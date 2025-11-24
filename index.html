@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>TREDIO Preview (fixed)</title>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  :root{ --bg:#0b0b0c; --panel:#111217; --muted:#9aa0a6; --green:#2ecc71; --red:#e74c3c; --accent:#f1c40f; }
+  html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:Inter,Arial,Helvetica,sans-serif}
+  .app{ max-width:980px;margin:12px auto;padding:12px; display:grid;grid-template-columns:1fr 360px;gap:12px; }
+  @media (max-width:900px){ .app{ grid-template-columns:1fr; padding:8px } }
+  .panel{ background:linear-gradient(180deg,#070708 0%, var(--panel) 100%); border-radius:12px;padding:12px;box-shadow:0 6px 20px rgba(0,0,0,0.6); }
+  .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .saldo { font-weight:700;color:var(--green) }
+  .chart-wrap{ position:relative; background:#000;border-radius:10px;padding:8px; }
+  canvas{ width:100% !important; height:360px !important; display:block; border-radius:8px; }
+  .overlay-line{ position:absolute; top:8px; bottom:8px; width:2px; pointer-events:none; transform:translateX(-50%); z-index:5; }
+  .overlay-open{ background:var(--accent); display:none; left:0; opacity:.95; border-radius:2px;}
+  .overlay-close{ background:var(--red); display:none; left:0; opacity:.95; border-radius:2px;}
+  .side{ display:flex;flex-direction:column;gap:12px; }
+  .card{ background:#0f1113;padding:12px;border-radius:10px; }
+  .small { color:var(--muted); font-size:13px }
+  .big { font-size:20px;font-weight:700 }
+  .controls { display:flex;flex-direction:column; gap:8px; margin-top:8px }
+  select,input[type="number"]{ padding:8px;border-radius:8px;border:1px solid #222;background:#0b0b0b;color:#fff }
+  .btn-row{ display:flex; gap:8px; }
+  .btn{ flex:1;padding:10px;border-radius:8px;border:none;font-weight:700;cursor:pointer;color:#fff }
+  .btn-up{ background:linear-gradient(135deg,var(--green),#27ae60) }
+  .btn-down{ background:linear-gradient(135deg,var(--red),#c0392b) }
+  .btn:disabled{ opacity:.5; cursor:not-allowed }
+  .status { margin-top:8px;padding:10px;border-radius:8px;background:#070708;text-align:center;font-weight:700 }
+  .result-win{ color:var(--green); font-weight:900 }
+  .result-lose{ color:var(--red); font-weight:900 }
+  .small-muted{ color:#9aa0a6; font-size:13px }
+  #loginScreen input{box-sizing:border-box}
+  .top-controls { display:flex; gap:8px; align-items:center; }
+  .icon-btn { background:#222;border:1px solid #222;color:#fff;padding:8px;border-radius:8px;cursor:pointer }
+  .select-interval{ min-width:140px }
+  /* timeline styles */
+  #timeLine{display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:#ff4444;font-weight:bold;padding:0 6px}
+  #timeLine span{flex:1;text-align:center;opacity:0.85}
+  #timeLine span:last-child{opacity:1;color:#fff;font-weight:900}
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#fff;font-family:Inter">
+  <h1 style="margin-bottom:20px;font-size:32px;font-weight:800">TREDIO</h1>
+  <div style="background:#111217;padding:20px;border-radius:12px;width:320px;box-shadow:0 0 20px rgba(0,0,0,0.5)">
+    <input id="loginUser" placeholder="Username" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:none;background:#0b0b0b;color:white" />
+    <input id="loginPass" placeholder="Password" type="password" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:none;background:#0b0b0b;color:white" />
+    <button id="btnLogin" style="width:100%;padding:10px;border:none;border-radius:8px;background:#2ecc71;font-weight:700;color:#fff;cursor:pointer">LOGIN</button>
+    <div id="loginError" style="margin-top:10px;color:#e74c3c;font-size:14px;display:none">Username / Password salah!</div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" style="display:none" id="mainApp">
+  <div class="panel">
+
+    <div class="header">
+      <div>
+        <div style="font-size:14px;color:#ddd">Harga Batubara Premium</div>
+
+        <a class="small-muted" 
+           href="https://wa.me/message/HWGD7LUY5VQIF1" 
+           target="_blank"
+           style="text-decoration:none; color:red; font-weight:bold;">
+          Deposit / Withdraw
+        </a>
+      </div>
+
+      <div style="text-align:right">
+        <div class="small-muted">Saldo Real:</div>
+        <div class="saldo" id="saldoText" style="font-size:15px;">Rp 0</div>
+      </div>
+    </div>
+
+    <!-- CHART -->
+    <div class="chart-wrap" id="chartWrap">
+      <canvas id="chartCanvas"></canvas>
+      <div id="overlayOpen" class="overlay-line overlay-open"></div>
+      <div id="overlayClose" class="overlay-line overlay-close"></div>
+    </div>
+
+    <!-- TIMELINE WAKTU -->
+    <div id="timeLine"></div>
+
+    <!-- INFO HARGA -->
+    <div style="display:flex;justify-content:space-between;margin-top:10px;">
+      <div class="small-muted">Harga Buka: <span id="txtOpen">-</span></div>
+      <div class="small-muted">Harga Sekarang: <span id="txtNow">-</span></div>
+      <div class="small-muted">Countdown: <span id="txtCountdown">Durasi taruhan</span>s</div>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div class="side">
+    <div class="card">
+
+      <div class="top-controls">
+        <button id="soundToggle" class="icon-btn">🔊</button>
+        <select id="intervalSelect" class="select-interval">
+          <option value="1">1 menit</option>
+          <option value="5" selected>5 menit</option>
+          <option value="10">10 menit</option>
+          <option value="20">20 menit</option>
+        </select>
+        <div style="flex:1;text-align:right;color:#9aa0a6;font-size:13px">
+          Durasi taruhan
+        </div>
+      </div>
+
+      <div style="margin-top:10px" class="small-muted">Pilih Nominal Cepat</div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <select id="quickAmount" style="flex:1">
+          <option value="">Pilih Nominal Cepat</option>
+          <option value="140000">140.000</option>
+          <option value="240000">240.000</option>
+          <option value="700000">700.000</option>
+          <option value="1400000">1.400.000</option>
+          <option value="14000000">14.000.000</option>
+          <option value="30000000">30.000.000</option>
+          <option value="74000000">74.000.000</option>
+        </select>
+      </div>
+
+      <div style="margin-top:8px">
+        <input id="manualAmount" type="number" placeholder="Atau masukkan manual (Rp)" style="width:100%" />
+      </div>
+
+      <div class="controls">
+        <div class="btn-row">
+          <button id="btnUp" class="btn btn-up">⬆ PASANG NAIK</button>
+          <button id="btnDown" class="btn btn-down">⬇ PASANG TURUN</button>
+        </div>
+
+        <div class="status" id="statusBox">Menunggu transaksi...</div>
+
+        <div class="small-muted" style="margin-top:8px">
+          <div>Hasil terakhir: <span id="lastResult">-</span></div>
+          <div>Harga Tutup (last): <span id="txtClose">-</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+/* =============================
+   CONFIG
+   ============================= */
+// GANTI dengan URL Web App Anda (Apps Script)
+const API_URL = "https://script.google.com/macros/s/AKfycbyjRYEo1RPo3I2fkL3r7DKkj0kjc23r0h82dR8GofUQDzAlHMZBO-hqUqFl9k1dEeKs/exec";
+
+/* =============================
+   HELPERS
+   ============================= */
+const formatIDR = v => 'Rp ' + Number(v).toLocaleString('id-ID');
+
+async function apiPost(payload){
+  try {
+    const r = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return await r.json();
+  } catch (e) {
+    console.error('API error', e);
+    return { success:false, error: e.message || 'network' };
+  }
+}
+
+/* =============================
+   DOM refs (declared early)
+   ============================= */
+let loginUserEl, loginPassEl, loginScreen, mainApp;
+let btnLogin, btnUp, btnDown, quickAmount, manualAmount, saldoText, lastResult;
+let txtNow, txtOpen, txtClose, txtCountdown, statusBox, intervalSelect, soundToggle;
+
+/* =============================
+   APP STATE
+   ============================= */
+let saldo = 0;
+let currentUser = null;
+let currentPass = null;
+
+/* =============================
+   INIT
+   ============================= */
+window.addEventListener('DOMContentLoaded', async ()=>{
+  // DOM refs
+  loginUserEl = document.getElementById('loginUser');
+  loginPassEl = document.getElementById('loginPass');
+  loginScreen = document.getElementById('loginScreen');
+  mainApp = document.getElementById('mainApp');
+
+  btnLogin = document.getElementById('btnLogin');
+  btnUp = document.getElementById('btnUp');
+  btnDown = document.getElementById('btnDown');
+  quickAmount = document.getElementById('quickAmount');
+  manualAmount = document.getElementById('manualAmount');
+  saldoText = document.getElementById('saldoText');
+  lastResult = document.getElementById('lastResult');
+
+  txtNow = document.getElementById('txtNow');
+  txtOpen = document.getElementById('txtOpen');
+  txtClose = document.getElementById('txtClose');
+  txtCountdown = document.getElementById('txtCountdown');
+  statusBox = document.getElementById('statusBox');
+  intervalSelect = document.getElementById('intervalSelect');
+  soundToggle = document.getElementById('soundToggle');
+
+  // wire events
+  btnLogin.addEventListener('click', handleLogin);
+  btnUp.addEventListener('click', ()=>startTrade('naik'));
+  btnDown.addEventListener('click', ()=>startTrade('turun'));
+  quickAmount.addEventListener('change', e => manualAmount.value = e.target.value);
+  soundToggle.addEventListener('click', toggleSound);
+
+  // try restore session
+  const sUser = localStorage.getItem('sessionUser');
+  const sPass = localStorage.getItem('sessionPass');
+  if(sUser && sPass){
+    // try login to refresh saldo
+    await doLogin(sUser, sPass);
+    showMainApp();
+  } else {
+    // show login
+    loginScreen.style.display = 'flex';
+    mainApp.style.display = 'none';
+  }
+
+  // start chart & timeline
+  startChartLoop();
+  updateTimeLine();
+  setInterval(updateTimeLine,1000);
+});
+
+/* =============================
+   LOGIN / SESSION
+   ============================= */
+async function handleLogin(){
+  const u = loginUserEl.value.trim();
+  const p = loginPassEl.value.trim();
+  if(!u || !p){ alert('Masukkan username & password'); return; }
+
+  const ok = await doLogin(u,p);
+  if(ok){
+    // persist session
+    localStorage.setItem('sessionUser', u);
+    localStorage.setItem('sessionPass', p);
+    showMainApp();
+  } else {
+    document.getElementById('loginError').style.display = 'block';
+  }
+}
+
+async function doLogin(u,p){
+  const res = await apiPost({ action: 'login', username: u, password: p });
+  if(res && res.success){
+    currentUser = res.username;
+    currentPass = p;
+    saldo = Number(res.saldo) || 0;
+    saldoText.textContent = formatIDR(saldo);
+    document.getElementById('loginError').style.display = 'none';
+    return true;
+  } else {
+    console.warn('login failed', res);
+    return false;
+  }
+}
+
+function showMainApp(){
+  loginScreen.style.display = 'none';
+  mainApp.style.display = 'grid';
+}
+
+/* =============================
+   SALDO SYNC
+   ============================= */
+async function refreshSaldoFromServer(){
+  if(!currentUser || !currentPass) return;
+  const res = await apiPost({ action: 'login', username: currentUser, password: currentPass });
+  if(res && res.success){
+    saldo = Number(res.saldo) || 0;
+    saldoText.textContent = formatIDR(saldo);
+  }
+}
+
+async function updateSaldoBaru(newSaldo){
+  if(!currentUser) return;
+  const res = await apiPost({ action: 'updateSaldo', username: currentUser, saldo: Number(newSaldo) });
+  if(res && res.success){
+    saldo = Number(newSaldo);
+    saldoText.textContent = formatIDR(saldo);
+    return true;
+  } else {
+    console.warn('updateSaldo failed', res);
+    return false;
+  }
+}
+
+/* =============================
+   CHART / DATA GENERATION
+   ============================= */
+const hargaPerMenit = [74.996,75.001,74.998,75.005,75.012,75.008,75.004,74.999,75.003,75.008,75.015,75.020,75.025,75.022,75.018,75.014,75.010,75.006,75.009,75.014,75.011,90000,175.000,50000,74.990,74.987,74.982,74.979,74.975,74.970,74.965,74.968,74.972,74.977,74.981,74.985,74.990,74.985,74.980,74.976,74.972,74.978,74.983,74.975,74.970,74.965,74.971,74.977,74.980,74.985,74.992,74.996,75.000,75.005,75.011,75.018,75.023,75.028,75.025,75.021];
+
+const ctx = document.getElementById('chartCanvas').getContext('2d');
+const customOverlayPlugin = {
+  id: 'customOverlay',
+  afterDraw(chart,args,options){
+    const {ctx, chartArea, scales} = chart;
+    const o = options.openIndex;
+    const c = options.closeIndex;
+    function X(i){ try { return i==null?null:scales.x.getPixelForValue(chart.data.labels[i]); } catch(e){return null} }
+    const oX = X(o), cX = X(c);
+    ctx.save();
+    if(oX!==null && cX!==null){
+      ctx.fillStyle='rgba(241,196,15,0.12)';
+      ctx.fillRect(Math.min(oX,cX), chartArea.top, Math.abs(oX-cX), chartArea.bottom-chartArea.top);
+    }
+    ctx.restore();
+    ctx.save();
+    if(oX!==null){
+      ctx.strokeStyle='rgba(241,196,15,0.95)'; ctx.setLineDash([6,4]);
+      ctx.beginPath(); ctx.moveTo(oX,chartArea.top); ctx.lineTo(oX,chartArea.bottom); ctx.stroke();
+    }
+    if(cX!==null){
+      ctx.strokeStyle='rgba(231,76,60,0.95)'; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(cX,chartArea.top); ctx.lineTo(cX,chartArea.bottom); ctx.stroke();
+    }
+    ctx.restore();
+  }
+};
+Chart.register(customOverlayPlugin);
+
+const chart = new Chart(ctx,{
+  type:'line',
+  data:{labels:[],datasets:[{label:'Harga',data:[],borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,0.06)',pointRadius:0,tension:0.28,borderWidth:2}]},
+  options:{animation:false,responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false},customOverlay:{openIndex:null,closeIndex:null}},
+    scales:{x:{ticks:{display:false},grid:{color:'#222'}},y:{ticks:{color:'#9aa0a6'},grid:{color:'#222'}}}
+  }
+});
+
+function getBaseMinute(){
+  const m=new Date().getMinutes();
+  return hargaPerMenit[(m===0?59:m-1)];
+}
+function getHargaDetik(){
+  return +(getBaseMinute() + (Math.random()-0.5)*0.03);
+}
+
+// sound
+let audioCtx=null, soundEnabled=true;
+function toggleSound(){ soundEnabled = !soundEnabled; soundToggle.textContent = soundEnabled ? '🔊' : '🔇'; }
+function playTick(){
+  if(!soundEnabled) return;
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(1000,audioCtx.currentTime);
+    g.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.06,audioCtx.currentTime+0.01);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.12);
+    o.stop(audioCtx.currentTime+0.15);
+  }catch(e){}
+}
+
+// push data
+let labelCounter = 0;
+function pushPoint(h){
+  chart.data.labels.push(labelCounter++);
+  chart.data.datasets[0].data.push(h);
+  if(chart.data.labels.length>120){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+  chart.update('none');
+}
+
+// SMOOTH final animation
+let smoothTarget = null;
+let smoothStartPrice = null;
+let smoothStartTime = 0;
+const smoothDurationMs = 1800;
+function startSmoothLoss(finalPrice){
+  if(!chart.data.datasets[0].data.length) return;
+  smoothTarget = finalPrice;
+  smoothStartPrice = chart.data.datasets[0].data[chart.data.datasets[0].data.length-1];
+  smoothStartTime = performance.now();
+  requestAnimationFrame(animateSmooth);
+}
+function animateSmooth(now){
+  if(smoothTarget === null) return;
+  const elapsed = now - smoothStartTime;
+  const t = Math.min(1, Math.max(0, elapsed / smoothDurationMs));
+  const ease = 1 - Math.pow(1 - t, 3);
+  const newPrice = smoothStartPrice + (smoothTarget - smoothStartPrice) * ease;
+  const lastIdx = chart.data.datasets[0].data.length - 1;
+  if(lastIdx >= 0){
+    chart.data.datasets[0].data[lastIdx] = newPrice;
+    chart.update('none');
+  }
+  if(t < 1) requestAnimationFrame(animateSmooth);
+  else smoothTarget = null;
+}
+function forceLoss(dir){
+  const cur = chart.data.datasets[0].data.slice(-1)[0] || getBaseMinute();
+  const offset = 0.03 + Math.random()*0.04;
+  const final = (dir==='naik' ? (openPrice!=null?openPrice:cur) - offset : (openPrice!=null?openPrice:cur) + offset);
+  startSmoothLoss(final);
+  return final;
+}
+
+/* periodic generation */
+function startChartLoop(){
+  setInterval(()=>{
+    const h = getHargaDetik();
+    if(txtNow) txtNow.textContent = h.toFixed(3);
+    pushPoint(h);
+    playTick();
+  },1000);
+}
+
+/* =============================
+   TRADING LOGIC
+   ============================= */
+let tradingActive=false, openPrice=null, openIndex=null, closeIndex=null, countdown=60, timer=null, chosenAmount=0;
+
+function pickAmount(){
+  const q = Number(quickAmount.value || 0);
+  const m = Number(manualAmount.value || 0);
+  return m>0?m:(q>0?q:0);
+}
+
+function setDisabled(x){
+  btnUp.disabled = x; btnDown.disabled = x;
+  quickAmount.disabled = x; manualAmount.disabled = x; intervalSelect.disabled = x;
+}
+
+async function startTrade(dir){
+  if(tradingActive) return alert('Transaksi masih berjalan');
+  chosenAmount = pickAmount();
+  if(!chosenAmount) return alert('Nominal belum dipilih');
+  if(chosenAmount>saldo) return alert('Saldo tidak cukup');
+
+  const last = chart.data.datasets[0].data.slice(-1)[0];
+  openPrice = last;
+  openIndex = chart.data.labels.length - 1;
+  closeIndex = null;
+
+  chart.options.plugins.customOverlay.openIndex = openIndex;
+  chart.options.plugins.customOverlay.closeIndex = null;
+  chart.update();
+
+  txtOpen.textContent = openPrice ? openPrice.toFixed(3) : '-';
+  txtClose.textContent = '-';
+
+  setDisabled(true);
+
+  countdown = Number(intervalSelect.value) * 60;
+  txtCountdown.textContent = countdown;
+  tradingActive = true;
+
+  statusBox.classList.remove('result-win','result-lose');
+  statusBox.textContent = 'NETRAL';
+
+  timer = setInterval(async ()=>{
+    countdown--; txtCountdown.textContent = countdown;
+
+    // interim result
+    const current = chart.data.datasets[0].data.slice(-1)[0];
+    let interim = 'NETRAL';
+    if(dir === 'naik'){
+      interim = current > openPrice ? 'MENANG' : (current < openPrice ? 'KALAH' : 'NETRAL');
+    } else {
+      interim = current < openPrice ? 'MENANG' : (current > openPrice ? 'KALAH' : 'NETRAL');
+    }
+
+    statusBox.classList.remove('result-win','result-lose');
+    if(interim === 'MENANG') { statusBox.textContent = 'MENANG'; statusBox.classList.add('result-win'); }
+    else if(interim === 'KALAH') { statusBox.textContent = 'KALAH'; statusBox.classList.add('result-lose'); }
+    else { statusBox.textContent = 'NETRAL'; }
+
+    if(countdown <= 0){
+      clearInterval(timer); timer = null;
+
+      // final: force loss opposite of user's bet
+      const final = forceLoss(dir);
+
+      // apply final loss to saldo and persist to server
+      saldo = Number(saldo) - Number(chosenAmount);
+      statusBox.classList.remove('result-win');
+      statusBox.classList.add('result-lose');
+      statusBox.textContent = `KALAH -${formatIDR(chosenAmount)} — ${final.toFixed(3)}`;
+      lastResult.textContent = 'KALAH';
+
+      // update UI
+      saldoText.textContent = formatIDR(saldo);
+      txtClose.textContent = final.toFixed(3);
+
+      // persist to server
+      await updateSaldoBaru(saldo);
+
+      closeIndex = chart.data.labels.length - 1;
+      chart.options.plugins.customOverlay.closeIndex = closeIndex;
+      chart.update();
+
+      tradingActive = false;
+      setDisabled(false);
+    }
+  },1000);
+}
+
+/* =============================
+   TIMELINE 5 MENIT KE BELAKANG
+   ============================= */
+function pad(n){ return n.toString().padStart(2,'0'); }
+function formatHM(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function updateTimeLine(){
+  const now = new Date();
+  const container = document.getElementById('timeLine');
+  let html = '';
+  for(let i=5;i>=0;i--){
+    const t = new Date(now.getTime() - (i * 60000));
+    html += `<span>${formatHM(t)}</span>`;
+    if(i>0) html += '';
+  }
+  container.innerHTML = html;
+}
+
+/* =============================
+   UTILITY: LOGOUT (opsional)
+   ============================= */
+function logout(){
+  localStorage.removeItem('sessionUser');
+  localStorage.removeItem('sessionPass');
+  location.reload();
+}
+</script>
+
+</body>
+</html>
