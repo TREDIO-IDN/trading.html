@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>TREDIO Preview (fixed)</title>
+<title>TREDIO Preview (auto-saved saldo)</title>
 
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -36,11 +36,9 @@
   .result-win{ color:var(--green); font-weight:900 }
   .result-lose{ color:var(--red); font-weight:900 }
   .small-muted{ color:#9aa0a6; font-size:13px }
-  #loginScreen input{box-sizing:border-box}
   .top-controls { display:flex; gap:8px; align-items:center; }
   .icon-btn { background:#222;border:1px solid #222;color:#fff;padding:8px;border-radius:8px;cursor:pointer }
   .select-interval{ min-width:140px }
-  /* timeline styles */
   #timeLine{display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:#ff4444;font-weight:bold;padding:0 6px}
   #timeLine span{flex:1;text-align:center;opacity:0.85}
   #timeLine span:last-child{opacity:1;color:#fff;font-weight:900}
@@ -48,19 +46,8 @@
 </head>
 <body>
 
-<!-- LOGIN SCREEN -->
-<div id="loginScreen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#fff;font-family:Inter">
-  <h1 style="margin-bottom:20px;font-size:32px;font-weight:800">TREDIO</h1>
-  <div style="background:#111217;padding:20px;border-radius:12px;width:320px;box-shadow:0 0 20px rgba(0,0,0,0.5)">
-    <input id="loginUser" placeholder="Username" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:none;background:#0b0b0b;color:white" />
-    <input id="loginPass" placeholder="Password" type="password" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:none;background:#0b0b0b;color:white" />
-    <button id="btnLogin" style="width:100%;padding:10px;border:none;border-radius:8px;background:#2ecc71;font-weight:700;color:#fff;cursor:pointer">LOGIN</button>
-    <div id="loginError" style="margin-top:10px;color:#e74c3c;font-size:14px;display:none">Username / Password salah!</div>
-  </div>
-</div>
-
-<!-- MAIN APP -->
-<div class="app" style="display:none" id="mainApp">
+<!-- MAIN APP (auto-login active) -->
+<div class="app" id="mainApp" style="display:grid">
   <div class="panel">
 
     <div class="header">
@@ -77,7 +64,7 @@
 
       <div style="text-align:right">
         <div class="small-muted">Saldo Real:</div>
-        <div class="saldo" id="saldoText" style="font-size:15px;">Rp 0</div>
+        <div class="saldo" id="saldoText" style="font-size:15px;">Rp 140.000.000</div>
       </div>
     </div>
 
@@ -153,397 +140,349 @@
 </div>
 
 <script>
-/* =============================
-   CONFIG
-   ============================= */
-// GANTI dengan URL Web App Anda (Apps Script)
-const API_URL = "https://script.google.com/macros/s/AKfycbx6GmfmQ9sxEBxL6wPIoReX5SHvaqz2rBc36VzSG1x5xeGW9jhZTG52KdA3Hki6p9CT/exec";
+/*
+  Integrasi Google Apps Script (Google Sheet) untuk menyimpan & mengambil saldo.
+  API_URL: gunakan URL web app Anda yang sudah di-deploy.
+*/
+const API_URL = "https://script.google.com/macros/s/AKfycbx-_a11rEW8NvNW7VTvbJAcqdtAZ0YswDotxCbmpEp1-BCjoQxcA-MNdDQAvmmIvveJ/exec";
 
-/* =============================
-   HELPERS
-   ============================= */
-const formatIDR = v => 'Rp ' + Number(v).toLocaleString('id-ID');
-
-async function apiPost(payload){
-  try {
-    const r = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    return await r.json();
-  } catch (e) {
-    console.error('API error', e);
-    return { success:false, error: e.message || 'network' };
-  }
-}
-
-/* =============================
-   DOM refs (declared early)
-   ============================= */
-let loginUserEl, loginPassEl, loginScreen, mainApp;
-let btnLogin, btnUp, btnDown, quickAmount, manualAmount, saldoText, lastResult;
-let txtNow, txtOpen, txtClose, txtCountdown, statusBox, intervalSelect, soundToggle;
-
-/* =============================
-   APP STATE
-   ============================= */
-let saldo = 0;
-let currentUser = null;
-let currentPass = null;
-
-/* =============================
-   INIT
-   ============================= */
-window.addEventListener('DOMContentLoaded', async ()=>{
-  // DOM refs
-  loginUserEl = document.getElementById('loginUser');
-  loginPassEl = document.getElementById('loginPass');
-  loginScreen = document.getElementById('loginScreen');
-  mainApp = document.getElementById('mainApp');
-
-  btnLogin = document.getElementById('btnLogin');
-  btnUp = document.getElementById('btnUp');
-  btnDown = document.getElementById('btnDown');
-  quickAmount = document.getElementById('quickAmount');
-  manualAmount = document.getElementById('manualAmount');
-  saldoText = document.getElementById('saldoText');
-  lastResult = document.getElementById('lastResult');
-
-  txtNow = document.getElementById('txtNow');
-  txtOpen = document.getElementById('txtOpen');
-  txtClose = document.getElementById('txtClose');
-  txtCountdown = document.getElementById('txtCountdown');
-  statusBox = document.getElementById('statusBox');
-  intervalSelect = document.getElementById('intervalSelect');
-  soundToggle = document.getElementById('soundToggle');
-
-  // wire events
-  btnLogin.addEventListener('click', handleLogin);
-  btnUp.addEventListener('click', ()=>startTrade('naik'));
-  btnDown.addEventListener('click', ()=>startTrade('turun'));
-  quickAmount.addEventListener('change', e => manualAmount.value = e.target.value);
-  soundToggle.addEventListener('click', toggleSound);
-
-  // try restore session
-  const sUser = localStorage.getItem('sessionUser');
-  const sPass = localStorage.getItem('sessionPass');
-  if(sUser && sPass){
-    // try login to refresh saldo
-    await doLogin(sUser, sPass);
-    showMainApp();
-  } else {
-    // show login
-    loginScreen.style.display = 'flex';
-    mainApp.style.display = 'none';
-  }
-
-  // start chart & timeline
-  startChartLoop();
-  updateTimeLine();
-  setInterval(updateTimeLine,1000);
-});
-
-/* =============================
-   LOGIN / SESSION
-   ============================= */
-async function handleLogin(){
-  const u = loginUserEl.value.trim();
-  const p = loginPassEl.value.trim();
-  if(!u || !p){ alert('Masukkan username & password'); return; }
-
-  const ok = await doLogin(u,p);
-  if(ok){
-    // persist session
-    localStorage.setItem('sessionUser', u);
-    localStorage.setItem('sessionPass', p);
-    showMainApp();
-  } else {
-    document.getElementById('loginError').style.display = 'block';
-  }
-}
-
-async function doLogin(u,p){
-  const res = await apiPost({ action: 'login', username: u, password: p });
-  if(res && res.success){
-    currentUser = res.username;
-    currentPass = p;
-    saldo = Number(res.saldo) || 0;
-    saldoText.textContent = formatIDR(saldo);
-    document.getElementById('loginError').style.display = 'none';
-    return true;
-  } else {
-    console.warn('login failed', res);
-    return false;
-  }
-}
-
-function showMainApp(){
-  loginScreen.style.display = 'none';
-  mainApp.style.display = 'grid';
-}
-
-/* =============================
-   SALDO SYNC
-   ============================= */
-async function refreshSaldoFromServer(){
-  if(!currentUser || !currentPass) return;
-  const res = await apiPost({ action: 'login', username: currentUser, password: currentPass });
-  if(res && res.success){
-    saldo = Number(res.saldo) || 0;
-    saldoText.textContent = formatIDR(saldo);
-  }
-}
-
-async function updateSaldoBaru(newSaldo){
-  if(!currentUser) return;
-  const res = await apiPost({ action: 'updateSaldo', username: currentUser, saldo: Number(newSaldo) });
-  if(res && res.success){
-    saldo = Number(newSaldo);
-    saldoText.textContent = formatIDR(saldo);
-    return true;
-  } else {
-    console.warn('updateSaldo failed', res);
-    return false;
-  }
-}
-
-/* =============================
-   CHART / DATA GENERATION
-   ============================= */
-const hargaPerMenit = [74.996,75.001,74.998,75.005,75.012,75.008,75.004,74.999,75.003,75.008,75.015,75.020,75.025,75.022,75.018,75.014,75.010,75.006,75.009,75.014,75.011,90000,175.000,50000,74.990,74.987,74.982,74.979,74.975,74.970,74.965,74.968,74.972,74.977,74.981,74.985,74.990,74.985,74.980,74.976,74.972,74.978,74.983,74.975,74.970,74.965,74.971,74.977,74.980,74.985,74.992,74.996,75.000,75.005,75.011,75.018,75.023,75.028,75.025,75.021];
-
-const ctx = document.getElementById('chartCanvas').getContext('2d');
-const customOverlayPlugin = {
-  id: 'customOverlay',
-  afterDraw(chart,args,options){
-    const {ctx, chartArea, scales} = chart;
-    const o = options.openIndex;
-    const c = options.closeIndex;
-    function X(i){ try { return i==null?null:scales.x.getPixelForValue(chart.data.labels[i]); } catch(e){return null} }
-    const oX = X(o), cX = X(c);
-    ctx.save();
-    if(oX!==null && cX!==null){
-      ctx.fillStyle='rgba(241,196,15,0.12)';
-      ctx.fillRect(Math.min(oX,cX), chartArea.top, Math.abs(oX-cX), chartArea.bottom-chartArea.top);
-    }
-    ctx.restore();
-    ctx.save();
-    if(oX!==null){
-      ctx.strokeStyle='rgba(241,196,15,0.95)'; ctx.setLineDash([6,4]);
-      ctx.beginPath(); ctx.moveTo(oX,chartArea.top); ctx.lineTo(oX,chartArea.bottom); ctx.stroke();
-    }
-    if(cX!==null){
-      ctx.strokeStyle='rgba(231,76,60,0.95)'; ctx.setLineDash([]);
-      ctx.beginPath(); ctx.moveTo(cX,chartArea.top); ctx.lineTo(cX,chartArea.bottom); ctx.stroke();
-    }
-    ctx.restore();
-  }
-};
-Chart.register(customOverlayPlugin);
-
-const chart = new Chart(ctx,{
-  type:'line',
-  data:{labels:[],datasets:[{label:'Harga',data:[],borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,0.06)',pointRadius:0,tension:0.28,borderWidth:2}]},
-  options:{animation:false,responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{display:false},customOverlay:{openIndex:null,closeIndex:null}},
-    scales:{x:{ticks:{display:false},grid:{color:'#222'}},y:{ticks:{color:'#9aa0a6'},grid:{color:'#222'}}}
-  }
-});
-
-function getBaseMinute(){
-  const m=new Date().getMinutes();
-  return hargaPerMenit[(m===0?59:m-1)];
-}
-function getHargaDetik(){
-  return +(getBaseMinute() + (Math.random()-0.5)*0.03);
-}
-
-// sound
-let audioCtx=null, soundEnabled=true;
-function toggleSound(){ soundEnabled = !soundEnabled; soundToggle.textContent = soundEnabled ? '🔊' : '🔇'; }
-function playTick(){
-  if(!soundEnabled) return;
+// ambil saldo dari Sheet (GET)
+async function loadSaldoFromSheet(){
   try{
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    const o=audioCtx.createOscillator(), g=audioCtx.createGain();
-    o.type='sine'; o.frequency.setValueAtTime(1000,audioCtx.currentTime);
-    g.gain.setValueAtTime(0.0001,audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.06,audioCtx.currentTime+0.01);
-    o.connect(g); g.connect(audioCtx.destination);
-    o.start(); g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.12);
-    o.stop(audioCtx.currentTime+0.15);
-  }catch(e){}
-}
-
-// push data
-let labelCounter = 0;
-function pushPoint(h){
-  chart.data.labels.push(labelCounter++);
-  chart.data.datasets[0].data.push(h);
-  if(chart.data.labels.length>120){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
-  chart.update('none');
-}
-
-// SMOOTH final animation
-let smoothTarget = null;
-let smoothStartPrice = null;
-let smoothStartTime = 0;
-const smoothDurationMs = 1800;
-function startSmoothLoss(finalPrice){
-  if(!chart.data.datasets[0].data.length) return;
-  smoothTarget = finalPrice;
-  smoothStartPrice = chart.data.datasets[0].data[chart.data.datasets[0].data.length-1];
-  smoothStartTime = performance.now();
-  requestAnimationFrame(animateSmooth);
-}
-function animateSmooth(now){
-  if(smoothTarget === null) return;
-  const elapsed = now - smoothStartTime;
-  const t = Math.min(1, Math.max(0, elapsed / smoothDurationMs));
-  const ease = 1 - Math.pow(1 - t, 3);
-  const newPrice = smoothStartPrice + (smoothTarget - smoothStartPrice) * ease;
-  const lastIdx = chart.data.datasets[0].data.length - 1;
-  if(lastIdx >= 0){
-    chart.data.datasets[0].data[lastIdx] = newPrice;
-    chart.update('none');
+    const r = await fetch(API_URL, { method: 'GET', cache: 'no-store' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const n = Number(d.saldo);
+    if(!isNaN(n)) {
+      window.saldo = n;
+      const e = document.getElementById("saldoText");
+      if(e) e.textContent = formatIDR(window.saldo);
+    }
+  }catch(err){
+    console.error("Gagal ambil saldo dari Sheet:", err);
+    // fallback: jika gagal, biarkan saldo default (diinisialisasi di script utama)
   }
-  if(t < 1) requestAnimationFrame(animateSmooth);
-  else smoothTarget = null;
-}
-function forceLoss(dir){
-  const cur = chart.data.datasets[0].data.slice(-1)[0] || getBaseMinute();
-  const offset = 0.03 + Math.random()*0.04;
-  const final = (dir==='naik' ? (openPrice!=null?openPrice:cur) - offset : (openPrice!=null?openPrice:cur) + offset);
-  startSmoothLoss(final);
-  return final;
 }
 
-/* periodic generation */
-function startChartLoop(){
-  setInterval(()=>{
-    const h = getHargaDetik();
-    if(txtNow) txtNow.textContent = h.toFixed(3);
-    pushPoint(h);
-    playTick();
-  },1000);
+// update saldo ke Sheet (POST)
+async function updateSaldoToSheet(newSaldo){
+  try{
+    await fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ saldo: Number(newSaldo) })
+    });
+    // notifikasi kecil (opsional) bisa ditambahkan
+  }catch(err){
+    console.error("Gagal update saldo ke Sheet:", err);
+  }
 }
 
-/* =============================
-   TRADING LOGIC
-   ============================= */
-let tradingActive=false, openPrice=null, openIndex=null, closeIndex=null, countdown=60, timer=null, chosenAmount=0;
+/* ================= MAIN APP SCRIPT ================= */
+(function(){
+  // DOM ready
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 
-function pickAmount(){
-  const q = Number(quickAmount.value || 0);
-  const m = Number(manualAmount.value || 0);
-  return m>0?m:(q>0?q:0);
-}
+  function init(){
+    // DOM refs
+    const mainApp = document.getElementById('mainApp');
+    const btnUp = document.getElementById('btnUp');
+    const btnDown = document.getElementById('btnDown');
+    const quickAmount = document.getElementById('quickAmount');
+    const manualAmount = document.getElementById('manualAmount');
+    const saldoText = document.getElementById('saldoText');
+    const lastResult = document.getElementById('lastResult');
+    const txtNow = document.getElementById('txtNow');
+    const txtOpen = document.getElementById('txtOpen');
+    const txtClose = document.getElementById('txtClose');
+    const txtCountdown = document.getElementById('txtCountdown');
+    const statusBox = document.getElementById('statusBox');
+    const intervalSelect = document.getElementById('intervalSelect');
+    const soundToggle = document.getElementById('soundToggle');
+    const canvas = document.getElementById('chartCanvas');
 
-function setDisabled(x){
-  btnUp.disabled = x; btnDown.disabled = x;
-  quickAmount.disabled = x; manualAmount.disabled = x; intervalSelect.disabled = x;
-}
+    // critical checks
+    if(!canvas){ console.error('canvas #chartCanvas tidak ditemukan'); return; }
+    if(mainApp) mainApp.style.display = 'grid';
 
-async function startTrade(dir){
-  if(tradingActive) return alert('Transaksi masih berjalan');
-  chosenAmount = pickAmount();
-  if(!chosenAmount) return alert('Nominal belum dipilih');
-  if(chosenAmount>saldo) return alert('Saldo tidak cukup');
+    // default saldo (dipakai saat fetch gagal)
+    window.saldo = 140000000;
 
-  const last = chart.data.datasets[0].data.slice(-1)[0];
-  openPrice = last;
-  openIndex = chart.data.labels.length - 1;
-  closeIndex = null;
+    // set initial text if element exists
+    const formatIDRLocal = v => 'Rp ' + Number(v).toLocaleString('id-ID');
+    // alias function name used in the rest of script
+    window.formatIDR = formatIDRLocal;
 
-  chart.options.plugins.customOverlay.openIndex = openIndex;
-  chart.options.plugins.customOverlay.closeIndex = null;
-  chart.update();
+    if(saldoText) saldoText.textContent = formatIDRLocal(window.saldo);
 
-  txtOpen.textContent = openPrice ? openPrice.toFixed(3) : '-';
-  txtClose.textContent = '-';
+    // ambil saldo dari Google Sheet (async, non-blocking)
+    loadSaldoFromSheet();
 
-  setDisabled(true);
+    // price data base (original array)
+    const hargaPerMenit = [74.996,75.001,74.998,75.005,75.012,75.008,75.004,74.999,75.003,75.008,75.015,75.020,75.025,75.022,75.018,75.014,75.010,75.006,75.009,75.014,75.011,90000,175.000,50000,74.990,74.987,74.982,74.979,74.975,74.970,74.965,74.968,74.972,74.977,74.981,74.985,74.990,74.985,74.980,74.976,74.972,74.978,74.983,74.975,74.970,74.965,74.971,74.977,74.980,74.985,74.992,74.996,75.000,75.005,75.011,75.018,75.023,75.028,75.025,75.021];
 
-  countdown = Number(intervalSelect.value) * 60;
-  txtCountdown.textContent = countdown;
-  tradingActive = true;
+    // chart setup (safe)
+    const ctx = canvas.getContext('2d');
+    let chart = null;
 
-  statusBox.classList.remove('result-win','result-lose');
-  statusBox.textContent = 'NETRAL';
+    const customOverlayPlugin = {
+      id: 'customOverlay',
+      afterDraw(chartInstance,args,options){
+        const {ctx, chartArea, scales} = chartInstance;
+        const o = options.openIndex;
+        const c = options.closeIndex;
 
-  timer = setInterval(async ()=>{
-    countdown--; txtCountdown.textContent = countdown;
+        function X(i){ return (i==null?null:scales.x.getPixelForValue(chartInstance.data.labels[i])); }
 
-    // interim result
-    const current = chart.data.datasets[0].data.slice(-1)[0];
-    let interim = 'NETRAL';
-    if(dir === 'naik'){
-      interim = current > openPrice ? 'MENANG' : (current < openPrice ? 'KALAH' : 'NETRAL');
-    } else {
-      interim = current < openPrice ? 'MENANG' : (current > openPrice ? 'KALAH' : 'NETRAL');
+        const oX = X(o), cX = X(c);
+
+        ctx.save();
+        if(oX!==null && cX!==null){
+          ctx.fillStyle='rgba(241,196,15,0.12)';
+          ctx.fillRect(Math.min(oX,cX), chartArea.top, Math.abs(oX-cX), chartArea.bottom-chartArea.top);
+        }
+        ctx.restore();
+
+        ctx.save();
+        if(oX!==null){
+          ctx.strokeStyle='rgba(241,196,15,0.95)'; ctx.setLineDash([6,4]);
+          ctx.beginPath(); ctx.moveTo(oX,chartArea.top); ctx.lineTo(oX,chartArea.bottom); ctx.stroke();
+        }
+        if(cX!==null){
+          ctx.strokeStyle='rgba(231,76,60,0.95)'; ctx.setLineDash([]);
+          ctx.beginPath(); ctx.moveTo(cX,chartArea.top); ctx.lineTo(cX,chartArea.bottom); ctx.stroke();
+        }
+        ctx.restore();
+      }
+    };
+
+    try{ Chart.register(customOverlayPlugin); }catch(e){ /* ignore if already registered */ }
+
+    function createChart(){
+      if(chart) return;
+      chart = new Chart(ctx,{
+        type:'line',
+        data:{labels:[],datasets:[{label:'Harga',data:[],borderColor:'#2ecc71',backgroundColor:'rgba(46,204,113,0.06)',pointRadius:0,tension:0.28,borderWidth:2}]},
+        options:{animation:false,responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},customOverlay:{openIndex:null,closeIndex:null}},
+          scales:{x:{ticks:{display:false},grid:{color:'#222'}},y:{ticks:{color:'#9aa0a6'},grid:{color:'#222'}}}
+        }
+      });
     }
 
-    statusBox.classList.remove('result-win','result-lose');
-    if(interim === 'MENANG') { statusBox.textContent = 'MENANG'; statusBox.classList.add('result-win'); }
-    else if(interim === 'KALAH') { statusBox.textContent = 'KALAH'; statusBox.classList.add('result-lose'); }
-    else { statusBox.textContent = 'NETRAL'; }
+    createChart();
 
-    if(countdown <= 0){
-      clearInterval(timer); timer = null;
-
-      // final: force loss opposite of user's bet
-      const final = forceLoss(dir);
-
-      // apply final loss to saldo and persist to server
-      saldo = Number(saldo) - Number(chosenAmount);
-      statusBox.classList.remove('result-win');
-      statusBox.classList.add('result-lose');
-      statusBox.textContent = `KALAH -${formatIDR(chosenAmount)} — ${final.toFixed(3)}`;
-      lastResult.textContent = 'KALAH';
-
-      // update UI
-      saldoText.textContent = formatIDR(saldo);
-      txtClose.textContent = final.toFixed(3);
-
-      // persist to server
-      await updateSaldoBaru(saldo);
-
-      closeIndex = chart.data.labels.length - 1;
-      chart.options.plugins.customOverlay.closeIndex = closeIndex;
-      chart.update();
-
-      tradingActive = false;
-      setDisabled(false);
+    function getBaseMinute(){
+      const m = new Date().getMinutes();
+      const idx = (m===0?59:m-1);
+      return hargaPerMenit[idx] !== undefined ? hargaPerMenit[idx] : 75.000;
     }
-  },1000);
-}
+    function getHargaDetik(){ return +(getBaseMinute() + (Math.random()-0.5)*0.03); }
 
-/* =============================
-   TIMELINE 5 MENIT KE BELAKANG
-   ============================= */
-function pad(n){ return n.toString().padStart(2,'0'); }
-function formatHM(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
-function updateTimeLine(){
-  const now = new Date();
-  const container = document.getElementById('timeLine');
-  let html = '';
-  for(let i=5;i>=0;i--){
-    const t = new Date(now.getTime() - (i * 60000));
-    html += `<span>${formatHM(t)}</span>`;
-    if(i>0) html += '';
-  }
-  container.innerHTML = html;
-}
+    // sound control
+    let audioCtx=null, soundEnabled=true;
+    if(soundToggle){
+      soundToggle.addEventListener('click', ()=>{
+        soundEnabled = !soundEnabled;
+        soundToggle.textContent = soundEnabled ? '🔊' : '🔇';
+      });
+    }
 
-/* =============================
-   UTILITY: LOGOUT (opsional)
-   ============================= */
-function logout(){
-  localStorage.removeItem('sessionUser');
-  localStorage.removeItem('sessionPass');
-  location.reload();
-}
+    function playTick(){ 
+      if(!soundEnabled) return;
+      try{
+        if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+        const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+        o.type='sine'; o.frequency.setValueAtTime(1000,audioCtx.currentTime);
+        g.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.06,audioCtx.currentTime+0.01);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(); g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.12);
+        o.stop(audioCtx.currentTime+0.15);
+      }catch(e){}
+    }
+
+    // chart data push
+    let labelCounter = 0;
+    function pushPoint(h){
+      if(!chart) createChart();
+      chart.data.labels.push(labelCounter++);
+      chart.data.datasets[0].data.push(h);
+      if(chart.data.labels.length>120){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+      chart.update('none');
+    }
+
+    // smooth animation
+    let smoothTarget = null, smoothStartPrice = null, smoothStartTime = 0;
+    const smoothDurationMs = 1800;
+    function startSmoothLoss(finalPrice){
+      if(!chart || !chart.data.datasets[0].data.length) return;
+      smoothTarget = finalPrice;
+      smoothStartPrice = chart.data.datasets[0].data[chart.data.datasets[0].data.length-1];
+      smoothStartTime = performance.now();
+      requestAnimationFrame(animateSmooth);
+    }
+    function animateSmooth(now){
+      if(smoothTarget === null) return;
+      const elapsed = now - smoothStartTime;
+      const t = Math.min(1, Math.max(0, elapsed / smoothDurationMs));
+      const ease = 1 - Math.pow(1 - t, 3);
+      const newPrice = smoothStartPrice + (smoothTarget - smoothStartPrice) * ease;
+      const lastIdx = chart.data.datasets[0].data.length - 1;
+      if(lastIdx >= 0){
+        chart.data.datasets[0].data[lastIdx] = newPrice;
+        chart.update('none');
+      }
+      if(t < 1){ requestAnimationFrame(animateSmooth); } else { smoothTarget = null; }
+    }
+
+    function forceLoss(dir, openPrice){
+      const cur = (chart && chart.data.datasets[0].data.length) ? chart.data.datasets[0].data.slice(-1)[0] : getBaseMinute();
+      let final;
+      const offset = 0.03 + Math.random()*0.04; // 0.03 - 0.07
+      if(dir === 'naik'){
+        final = (openPrice != null ? openPrice : cur) - offset;
+      } else {
+        final = (openPrice != null ? openPrice : cur) + offset;
+      }
+      startSmoothLoss(final);
+      return final;
+    }
+
+    // periodic data generation every second
+    setInterval(()=>{
+      const h = getHargaDetik();
+      if(txtNow) txtNow.textContent = h.toFixed(3);
+      pushPoint(h);
+      playTick();
+      if(mainApp && getComputedStyle(mainApp).display !== 'none' && chart){
+        try{ chart.resize(); }catch(e){}
+      }
+    },1000);
+
+    /* ============= TRADING LOGIC ============= */
+    let tradingActive=false, openPrice=null, openIndex=null, closeIndex=null, countdown=60, timer=null, chosenAmount=0;
+
+    function pickAmount(){
+      const q = quickAmount ? Number(quickAmount.value || 0) : 0;
+      const m = manualAmount ? Number(manualAmount.value || 0) : 0;
+      return m>0?m:(q>0?q:0);
+    }
+
+    function setDisabled(x){
+      if(btnUp) btnUp.disabled = x;
+      if(btnDown) btnDown.disabled = x;
+      if(quickAmount) quickAmount.disabled = x;
+      if(manualAmount) manualAmount.disabled = x;
+      if(intervalSelect) intervalSelect.disabled = x;
+    }
+
+    async function startTrade(dir){
+      if(tradingActive) return alert('Transaksi masih berjalan');
+      chosenAmount = pickAmount();
+      if(!chosenAmount) return alert('Nominal belum dipilih');
+      if(chosenAmount>window.saldo) return alert('Saldo tidak cukup');
+
+      const last = chart.data.datasets[0].data.slice(-1)[0];
+      openPrice = last;
+      openIndex = chart.data.labels.length - 1;
+      closeIndex = null;
+
+      if(chart){
+        chart.options.plugins.customOverlay.openIndex = openIndex;
+        chart.options.plugins.customOverlay.closeIndex = null;
+        chart.update();
+      }
+
+      if(txtOpen) txtOpen.textContent = openPrice ? openPrice.toFixed(3) : '-';
+      if(txtClose) txtClose.textContent = '-';
+
+      setDisabled(true);
+
+      countdown = Number(intervalSelect.value) * 60;
+      if(txtCountdown) txtCountdown.textContent = countdown;
+      tradingActive = true;
+
+      if(statusBox){ statusBox.classList.remove('result-win','result-lose'); statusBox.textContent = 'NETRAL'; }
+
+      timer = setInterval(async ()=>{
+        countdown--; if(txtCountdown) txtCountdown.textContent = countdown;
+
+        const current = chart.data.datasets[0].data.slice(-1)[0];
+        let interim = 'NETRAL';
+        if(dir === 'naik'){
+          interim = current > openPrice ? 'MENANG' : (current < openPrice ? 'KALAH' : 'NETRAL');
+        } else {
+          interim = current < openPrice ? 'MENANG' : (current > openPrice ? 'KALAH' : 'NETRAL');
+        }
+
+        if(statusBox){
+          statusBox.classList.remove('result-win','result-lose');
+          if(interim === 'MENANG') { statusBox.textContent = 'MENANG'; statusBox.classList.add('result-win'); }
+          else if(interim === 'KALAH') { statusBox.textContent = 'KALAH'; statusBox.classList.add('result-lose'); }
+          else { statusBox.textContent = 'NETRAL'; }
+        }
+
+        if(countdown <= 0){
+          clearInterval(timer); timer = null;
+
+          // compute final (force loss behavior preserved)
+          const final = forceLoss(dir, openPrice);
+
+          // apply result: (existing logic always treats final as loss)
+          window.saldo -= chosenAmount;
+
+          if(statusBox){
+            statusBox.classList.remove('result-win');
+            statusBox.classList.add('result-lose');
+            statusBox.textContent = `KALAH -${formatIDR(chosenAmount)} — ${final.toFixed(3)}`;
+          }
+          if(lastResult) lastResult.textContent = 'KALAH';
+          if(saldoText) saldoText.textContent = formatIDR(window.saldo);
+          if(txtClose) txtClose.textContent = final.toFixed(3);
+
+          closeIndex = chart.data.labels.length - 1;
+          if(chart){ chart.options.plugins.customOverlay.closeIndex = closeIndex; chart.update(); }
+
+          tradingActive = false;
+          setDisabled(false);
+
+          // UPDATE SALDO TO GOOGLE SHEET (async - fire & forget)
+          updateSaldoToSheet(window.saldo);
+        }
+      },1000);
+    }
+
+    if(btnUp) btnUp.addEventListener('click', ()=>startTrade('naik'));
+    if(btnDown) btnDown.addEventListener('click', ()=>startTrade('turun'));
+
+    if(quickAmount) quickAmount.addEventListener('change', e=>{ if(manualAmount) manualAmount.value = e.target.value; });
+
+    /* TIMELINE 5 MENIT KE BELAKANG */
+    function pad(n){ return n.toString().padStart(2,'0'); }
+    function formatHM(d){ return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+
+    function updateTimeLine(){
+      const now = new Date();
+      const container = document.getElementById('timeLine');
+      let html = '';
+      for(let i=5;i>=0;i--){
+        const t = new Date(now.getTime() - (i * 60000));
+        html += `<span>${formatHM(t)}</span>`;
+        if(i>0) html += '';
+      }
+      container.innerHTML = html;
+    }
+
+    updateTimeLine();
+    setInterval(updateTimeLine,1000);
+
+  } // init end
+})(); // IIFE end
 </script>
 
 </body>
